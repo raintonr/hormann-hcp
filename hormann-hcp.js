@@ -3,8 +3,8 @@ const InterByteTimeout = require('@serialport/parser-inter-byte-timeout');
 const CRC = require('crc-full').CRC;
 var crcCalculator = new CRC('CRC8', 8, 0x07, 0xf3, 0x00, false, false);
 
-// Address to respond to. Emulate an 'intelligent controller' (129-143)
-const icAddress = 130;
+// Address to respond to. Emulate an 'Intelligent control panel' (16-45)
+const icAddress = 40;
 
 console.log('Setting up port...');
 const port = new SerialPort('/dev/ttyUSB0', {
