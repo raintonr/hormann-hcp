@@ -70,7 +70,13 @@ parser.on('data', (buffer) => {
         setTimeout(() => {
             const delay = dataDelay();
             console.log(`+${delay}\tSending ${toSend.length}\t ${toSend.toString('hex')}`);
-            port.write(toSend);
+            if (!port.write(toSend, 'binary', (err) => {
+                if (err) {
+                    console.log('Error writing: ', err.message)
+                }
+            })) {
+                console.log('We should wait for drain!');
+            };
             toSend = undefined;
         }, 5);
     }
@@ -107,8 +113,8 @@ function makeSend(target, bytes) {
 }
 
 console.log('Opening port...');
-port.open(function (err) {
+port.open((err) => {
     if (err) {
-        return console.log('Error opening port: ', err.message)
+        console.log('Error opening port: ', err.message)
     }
 });
