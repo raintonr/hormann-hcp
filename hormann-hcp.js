@@ -13,6 +13,7 @@ const port = new SerialPort('/dev/ttyUSB0', {
 });
 
 var toSend;
+var masterStatus;
 
 console.log('Initiating parser...');
 const parser = port.pipe(new InterByteTimeout({ interval: 1, maxBufferSize: 16 }));
@@ -22,12 +23,17 @@ parser.on('data', (buffer) => {
         console.error(`Bad CRC check\t ${buffer.toString('hex')} :${crc.toString(16)}`);
     } else {
         switch (buffer[1]) {
-            case 0: // Broadcast status
-                console.log(`Broadcast\t ${buffer.toString('hex')}`);
+            case 0: // Broadcast status from master
+                process.stdout.write(`Broadcast\t ${buffer.toString('hex')}\r`);
+                const currentStatus = buffer[3];
+                if (masterStatus !== currentStatus) {
+                    masterStatus = currentStatus;
+                    console.log(`New status\t ${buffer.toString('hex')} -> ${masterStatus.toString(2)}`);
+                }
                 break;
     
             default:
-                console.log(`Unknown ${buffer.length}\t ${buffer.toString('hex')}`);
+                process.stdout.write(`Unknown ${buffer.length}\t ${buffer.toString('hex')}\r`);
                 break;
         }
     }
