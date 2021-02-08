@@ -26,6 +26,17 @@ parser.on('data', (buffer) => {
             case 0: // Broadcast status from master
                 process.stdout.write(`Broadcast\t ${buffer.toString('hex')}\r`);
                 const currentStatus = buffer[3];
+
+                // Status mask for LineaMatic P:
+                // +------- (0x80) Unknown
+                //  +------ (0x40) Motor running: 1 == running. 0 == stopped.
+                //   +----- (0x20) Motor direction: 1 == closing. 0 == opening.
+                //    +---- (0x10) Unknown
+                //     +--- (0x08) Unknown (fully closed?)
+                //      +-- (0x04) Reed switch: 1 == no magnet. 0 == magnet present (fully open).
+                //       +- (0x02) Unknown
+                //        + (0x01) Unknown
+
                 if (masterStatus !== currentStatus) {
                     masterStatus = currentStatus;
                     console.log(`New status\t ${buffer.toString('hex')} -> ${masterStatus.toString(2)}`);
@@ -41,6 +52,7 @@ parser.on('data', (buffer) => {
     // If we have something to send out, do it now
     if (Buffer.isBuffer(toSend) && toSend.length > 0) {
         console.log(`Sending ${toSend.length}\t ${toSend.toString('hex')}`);
+        // TODO: send data
         toSend = undefined;
     }
 });
