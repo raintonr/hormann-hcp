@@ -4,6 +4,7 @@
     "description": "Experiments with the Hormann HCP bus",
     "main": "hormann-hcp.js",
     "dependencies": {
+        "crc-full": "*",
         "serialport": "*"
     },
     "devDependencies": {},
