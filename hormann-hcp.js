@@ -14,7 +14,7 @@ const port = new SerialPort('/dev/ttyUSB0', {
     dataBits: 8,
     parity: 'none',
     stopBits: 1,
-    highWaterMark: 1
+    highWaterMark: 1 // Necessary for the parser to process messages byte at a time
 });
 
 var toSend;
