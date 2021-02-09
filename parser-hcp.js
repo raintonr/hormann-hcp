@@ -38,7 +38,7 @@ class HCPParser extends Transform {
     }
     _transform(chunk, encoding, cb) {
         const delay = this._dataDelay();
-//        console.log(`+${delay}\tNew chunk (${chunk.length})\t${chunk.toString('hex')}`);
+//        console.log(`\t\t\t\t\t+${delay}\tNew chunk (${chunk.length})\t${chunk.toString('hex')}`);
         const byte = chunk[0];
         
         if (delay > packetInterval && !this.currentPacketInProgress) {

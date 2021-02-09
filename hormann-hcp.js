@@ -2,7 +2,10 @@ const SerialPort = require('serialport');
 const HCPParser = require('./parser-hcp');
 
 // Address to respond to. Emulate an 'Intelligent control panel' (16-45)
-const icAddress = 40;
+const icAddress = 130;
+
+// Address of gate motor 'master'
+const driveAddress = 0x80;
 
 console.log('Setting up port...');
 const port = new SerialPort('/dev/ttyUSB0', {
@@ -18,14 +21,35 @@ var toSend;
 var masterStatus;
 var lastData = Date.now();
 
+// Specification calls for a rotating counter
+var counter = 0;
+
+// TODO: Prepare for when we will use keyboard input to send
+var stdin = process.stdin;
+stdin.setRawMode(true);
+stdin.resume();
+stdin.setEncoding('utf8');
+stdin.on('data', function (key) {
+    // ctrl-c ( end of text )
+    if (key === '\u0003') {
+        process.exit();
+    }
+    // write the key to stdout all normal like
+    if (key === '1') {
+        console.log('Sending command 1');
+        //makeSend(driveAddress, [41, 2]);
+    }
+});
+
 console.log('Initiating parser...');
 const hcpParser = new HCPParser({ receiveAddress: icAddress });
 const parser = port.pipe(hcpParser);
 parser.on('data', (buffer) => {
     const delay = dataDelay();
-//    console.log(`\n+${delay}\tData\t ${buffer.toString('hex')}`);
+    //    console.log(`\n+${delay}\tData\t ${buffer.toString('hex')}`);
+
     if (buffer[0] === 0) {
-//        process.stdout.write(`\t\t\t\t\t\t\t+${delay}\tBroadcast\t ${buffer.toString('hex')}\r`);
+        //        process.stdout.write(`\t\t\t\t\t\t\t+${delay}\tBroadcast\t ${buffer.toString('hex')}\r`);
         const currentStatus = buffer[2];
 
         // Status mask for LineaMatic P:
@@ -51,6 +75,11 @@ parser.on('data', (buffer) => {
             //Reply pretending to be a UAP1
             // 3: Device type (UAP1 is allegedly 20)
             // 4: Device address
+
+            // Pull counter out of message
+            counter = buffer[1] & 0xf0;
+            counter = counter >> 4;
+
             makeSend(buffer[3], [20, icAddress]);
         } else {
             console.error(`\n+${delay}\tUnknown message for us\t ${buffer.toString('hex')}`);
@@ -59,29 +88,26 @@ parser.on('data', (buffer) => {
         console.log(`+${delay}\tUnknown ${buffer.length}\t ${buffer.toString('hex')}`);
     }
 
-    // If we have something to send out, do it now
+    // If we have something to send out, don't do it after a broadcast message
     if (Buffer.isBuffer(toSend) && toSend.length > 0) {
-        // Wait at little before replying. TODO: just experimentation!
-        setTimeout(() => {
-            const delay = dataDelay();
-            console.log(`+${delay}\tSending ${toSend.length}\t ${toSend.toString('hex')}`);
-            if (!port.write(toSend, (err) => {
-                if (err) {
-                    console.error('Error writing: ', err.message)
-                }
-            })) {
-                console.log('We should wait for drain!');
-                port.drain((err) => {
-                    if (err) {
-                        console.error('Error draining: ', err.message);
-                    } else {
-                        console.log('Done drain');
-                    }
-                });
-            };
-            toSend = undefined;
-        }, 1);
+        const delay = dataDelay();
+        console.log(`+${delay}\tSending ${toSend.length}\t ${toSend.toString('hex')}`);
+        port.write(toSend, (err) => {
+            if (err) {
+                console.error('Error writing: ', err.message)
+            }
+        });
+        port.drain((err) => {
+            if (err) {
+                console.error('Error draining: ', err.message);
+            }
+        });
+        toSend = undefined;
     }
+});
+
+port.on('drain', () => {
+    console.log('Drain emitted');
 });
 
 function dataDelay() {
@@ -92,8 +118,6 @@ function dataDelay() {
     return dataDelay;
 }
 
-// Specification calls for a rotating counter for each transmit
-var counter = 0;
 function makeSend(target, bytes) {
     // Pad start with x empty bytes. TODO: just experimentation!
     const emptyStart = 0;
