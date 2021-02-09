@@ -65,12 +65,19 @@ parser.on('data', (buffer) => {
         setTimeout(() => {
             const delay = dataDelay();
             console.log(`+${delay}\tSending ${toSend.length}\t ${toSend.toString('hex')}`);
-            if (!port.write(toSend, 'binary', (err) => {
+            if (!port.write(toSend, (err) => {
                 if (err) {
-                    console.log('Error writing: ', err.message)
+                    console.error('Error writing: ', err.message)
                 }
             })) {
                 console.log('We should wait for drain!');
+                port.drain((err) => {
+                    if (err) {
+                        console.error('Error draining: ', err.message);
+                    } else {
+                        console.log('Done drain');
+                    }
+                });
             };
             toSend = undefined;
         }, 1);
