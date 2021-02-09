@@ -19,12 +19,13 @@ var masterStatus;
 var lastData = Date.now();
 
 console.log('Initiating parser...');
-const parser = port.pipe(new HCPParser({ receiveAddress: icAddress }));
+const hcpParser = new HCPParser({ receiveAddress: icAddress });
+const parser = port.pipe(hcpParser);
 parser.on('data', (buffer) => {
     const delay = dataDelay();
 //    console.log(`\n+${delay}\tData\t ${buffer.toString('hex')}`);
     if (buffer[0] === 0) {
-        process.stdout.write(`\t\t\t\t\t\t\t+${delay}\tBroadcast\t ${buffer.toString('hex')}\r`);
+//        process.stdout.write(`\t\t\t\t\t\t\t+${delay}\tBroadcast\t ${buffer.toString('hex')}\r`);
         const currentStatus = buffer[2];
 
         // Status mask for LineaMatic P:
@@ -50,7 +51,7 @@ parser.on('data', (buffer) => {
             //Reply pretending to be a UAP1
             // 3: Device type (UAP1 is allegedly 20)
             // 4: Device address
-            //makeSend(buffer[4], [20, icAddress]);
+            makeSend(buffer[3], [20, icAddress]);
         } else {
             console.error(`\n+${delay}\tUnknown message for us\t ${buffer.toString('hex')}`);
         }
@@ -103,7 +104,7 @@ function makeSend(target, bytes) {
     toSend[emptyStart + 2] = bytes[0];
     toSend[emptyStart + 3] = bytes[1];
 
-    toSend[toSend.length - 1] = crcCalculator.compute(toSend.slice(emptyStart, toSend.length - 1));
+    toSend[toSend.length - 1] = hcpParser.computeCRC(toSend.slice(emptyStart, toSend.length - 1));
 }
 
 console.log('Opening port...');

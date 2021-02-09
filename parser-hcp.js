@@ -2,7 +2,7 @@ const { Transform } = require('stream');
 const CRC = require('crc-full').CRC;
 
 // Timespan with no data before we consider a new packet starts (nanoseconds);
-const packetInterval = BigInt(7000000);
+const packetInterval = BigInt(2300000);
 
 class HCPParser extends Transform {
     constructor(options) {
@@ -41,27 +41,19 @@ class HCPParser extends Transform {
 //        console.log(`+${delay}\tNew chunk (${chunk.length})\t${chunk.toString('hex')}`);
         const byte = chunk[0];
         
-        if (delay > packetInterval) {
+        if (delay > packetInterval && !this.currentPacketInProgress) {
             // Transmission window passed, start a new packet
             if (byte !== 0) {
-                console.error(`\t\tStart packet with non-zero?!`);
+                console.error(`\t\t\t\tStart packet with non-zero?! (${byte})`);
             } else {
 //                console.log(`\t\tStart packet`);
                 this.currentPacketInProgress = true;
             }
         } else if (this.currentPacketInProgress) {
+//            console.log(`${delay} < ${packetInterval}`);
             const byteSeq = this.currentPacket.length;
             if (byteSeq === 0) {
-                // Receiving address
-                if (byte === 0 || byte === this.receiveAddress) {
-                    // Broadcast or for us
-//                    console.log(`\t\tCurrent packet is of interest (${byte})`);
-                    this.currentPacket.push(byte);
-                } else {
-                    // We don't care - bin this
-//                    console.log(`\t\tIgnore address ${byte}`);
-                    this._clearPacket();
-                }
+                this.currentPacket.push(byte);
             } else if (byteSeq === 1) {
                 // Counter/message length
                 // High nibble == counter. TODO: ignore for now
@@ -76,13 +68,14 @@ class HCPParser extends Transform {
                 this.currentPacket.push(byte);
             } else {
                 // Last byte of message - this is CRC
-                const crc = this.crcCalculator.compute(this.currentPacket);
-                if (byte === crc) {
-                    this.emitPacket()
-                } else {
+                const crc = this.computeCRC(this.currentPacket);
+                if (byte !== crc) {
                     console.error(`\t\tCRC: ${byte} != ${crc}`);
-                    this._clearPacket();
+                } else if (this.currentPacket[0] === 0 || this.currentPacket[0] === this.receiveAddress) {
+                    // Only emit packet if it's broadcast or for receive address
+                    this.emitPacket();
                 }
+                this._clearPacket();
             }
         }
         cb();
@@ -91,12 +84,14 @@ class HCPParser extends Transform {
         //        console.log(`Time to emit (${this.currentPacket.length})\t${this.currentPacket.toString('hex')}`);
         if (this.currentPacket.length > 0) {
             this.push(Buffer.from(this.currentPacket))
-            this._clearPacket();
         }
     }
     _flush(cb) {
         this.emitPacket();
         cb();
+    }
+    computeCRC(bytes) {
+        return this.crcCalculator.compute(bytes);
     }
 }
 
