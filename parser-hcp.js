@@ -21,6 +21,7 @@ class HCPParser extends Transform {
 
         this.maxBufferSize = options.maxBufferSize;
         this.receiveAddress = options.receiveAddress;
+        this.promiscuous = options.promiscuous;
         this.lastChunk = BigInt(0);
         this._clearPacket();
     }
@@ -28,6 +29,7 @@ class HCPParser extends Transform {
         this.currentPacket = [];
         this.currentMessageEnd = 0;
         this.currentPacketInProgress = false;
+        this.packetTime = BigInt(0);
     }
     _dataDelay() {
         // Work out delay since last message
@@ -38,19 +40,20 @@ class HCPParser extends Transform {
     }
     _transform(chunk, encoding, cb) {
         const delay = this._dataDelay();
-//        console.log(`\t\t\t\t\t+${delay}\tNew chunk (${chunk.length})\t${chunk.toString('hex')}`);
+        //        console.log(`\t\t\t\t\t+${delay}\tNew chunk (${chunk.length})\t${chunk.toString('hex')}`);
         const byte = chunk[0];
-        
+
         if (delay > packetInterval && !this.currentPacketInProgress) {
             // Transmission window passed, start a new packet
             if (byte !== 0) {
                 console.error(`\t\t\t\tStart packet with non-zero?! (${byte})`);
             } else {
-//                console.log(`\t\tStart packet`);
+                this.packetTime = process.hrtime.bigint();
+                //                console.log(`\t\tStart packet`);
                 this.currentPacketInProgress = true;
             }
         } else if (this.currentPacketInProgress) {
-//            console.log(`${delay} < ${packetInterval}`);
+            //            console.log(`${delay} < ${packetInterval}`);
             const byteSeq = this.currentPacket.length;
             if (byteSeq === 0) {
                 this.currentPacket.push(byte);
@@ -61,18 +64,18 @@ class HCPParser extends Transform {
                 this.currentMessageEnd = byte & 0x0f;
                 // So last byte of this message will be...
                 this.currentMessageEnd += byteSeq + 1;
-//                console.log(`\t\tCurrent packet will end byte ${this.currentMessageEnd}`);
+                //                console.log(`\t\tCurrent packet will end byte ${this.currentMessageEnd}`);
                 this.currentPacket.push(byte);
             } else if (byteSeq < this.currentMessageEnd) {
-//                console.log(`\t\tData: ${byte}`);
+                //                console.log(`\t\tData: ${byte}`);
                 this.currentPacket.push(byte);
             } else {
                 // Last byte of message - this is CRC
                 const crc = this.computeCRC(this.currentPacket);
                 if (byte !== crc) {
                     console.error(`\t\tCRC: ${byte} != ${crc}`);
-                } else if (this.currentPacket[0] === 0 || this.currentPacket[0] === this.receiveAddress) {
-                    // Only emit packet if it's broadcast or for receive address
+                } else if (this.promiscuous || this.currentPacket[0] === 0 || this.currentPacket[0] === this.receiveAddress) {
+                    // Ppromiscuous mode, broadcast packet or for receive address
                     this.emitPacket();
                 }
                 this._clearPacket();
@@ -81,7 +84,6 @@ class HCPParser extends Transform {
         cb();
     }
     emitPacket() {
-        //        console.log(`Time to emit (${this.currentPacket.length})\t${this.currentPacket.toString('hex')}`);
         if (this.currentPacket.length > 0) {
             this.push(Buffer.from(this.currentPacket))
         }
@@ -92,6 +94,9 @@ class HCPParser extends Transform {
     }
     computeCRC(bytes) {
         return this.crcCalculator.compute(bytes);
+    }
+    getPacketTime() {
+        return this.packetTime;
     }
 }
 
