@@ -2,7 +2,7 @@ const SerialPort = require('serialport');
 const HCPParser = require('./parser-hcp');
 const NanoTimer = require('nanotimer');
 const slotTimer = new NanoTimer();
-var slotDelay = '2300u';
+var slotDelay = BigInt(500000);
 
 // Address to respond to. Emulate an 'Intelligent control panel' (16-45)
 const icAddress = 0x28;
@@ -47,7 +47,8 @@ console.log('Initiating parser...');
 const hcpParser = new HCPParser({ receiveAddress: icAddress });
 const parser = port.pipe(hcpParser);
 parser.on('data', (buffer) => {
-    const delay = dataDelay();
+    const delay = dataDelay(hcpParser.getPacketTime());
+    console.log(`+${delay}\tData\t ${buffer.toString('hex')}`);
 
     var reply;
     // Set a timeout on our reply slot
@@ -55,9 +56,7 @@ parser.on('data', (buffer) => {
         if (Buffer.isBuffer(reply)) {
             writeDrain(reply);
         }
-    }, '', slotDelay);
-
-    //    console.log(`+${delay}\tData\t ${buffer.toString('hex')}`);
+    }, '', (process.hrtime.bigint() - hcpParser.getPacketTime() + slotDelay) + 'n');
 
     if (buffer[0] === 0) {
         //        process.stdout.write(`\t\t\t\t\t\t\t+${delay}\tBroadcast\t ${buffer.toString('hex')}\r`);
@@ -96,12 +95,12 @@ parser.on('data', (buffer) => {
             console.error(`\n+${delay}\tUnknown message for us\t ${buffer.toString('hex')}`);
         }
     } else {
-        console.log(`+${delay}\tUnknown ${buffer.length}\t ${buffer.toString('hex')}`);
+        //        console.log(`+${delay}\tUnknown ${buffer.length}\t ${buffer.toString('hex')}`);
     }
 });
 
 function writeDrain(toSend) {
-    const delay = dataDelay();
+    const delay = dataDelay(process.hrtime.bigint());
     console.log(`+${delay}\tSending\t${toSend.length}\t${toSend.toString('hex')}`);
     port.write(toSend, (err) => {
         if (err) {
@@ -124,12 +123,12 @@ function send(target, bytes) {
 }
 
 port.on('drain', () => {
-    //    console.log('Drain emitted');
+    const delay = dataDelay(process.hrtime.bigint());
+    console.log(`+${delay}\tDrain emitted`);
 });
 
-function dataDelay() {
+function dataDelay(dataTime) {
     // Work out delay since last message
-    const dataTime = process.hrtime.bigint();
     const dataDelay = dataTime - lastData;
     lastData = dataTime;
     return dataDelay;
