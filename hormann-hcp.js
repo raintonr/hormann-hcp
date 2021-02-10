@@ -2,7 +2,7 @@ const SerialPort = require('serialport');
 const HCPParser = require('./parser-hcp');
 const NanoTimer = require('nanotimer');
 const slotTimer = new NanoTimer();
-var slotDelay = BigInt(500000);
+var slotDelay = BigInt(5000000);
 
 // Address to respond to. Emulate an 'Intelligent control panel' (16-45)
 const icAddress = 0x28;
@@ -48,7 +48,7 @@ const hcpParser = new HCPParser({ receiveAddress: icAddress });
 const parser = port.pipe(hcpParser);
 parser.on('data', (buffer) => {
     const delay = dataDelay(hcpParser.getPacketTime());
-    console.log(`+${delay}\tData\t ${buffer.toString('hex')}`);
+//    console.log(`+${delay}\tData\t ${buffer.toString('hex')}`);
 
     var reply;
     // Set a timeout on our reply slot
@@ -80,7 +80,7 @@ parser.on('data', (buffer) => {
         // Something for our address
         if (buffer[2] === 0x01) {
             // Slave query
-            console.log(`\n+${delay}\tSlave query\t ${buffer.toString('hex')}`);
+            console.log(`+${delay}\tSlave query\t ${buffer.toString('hex')}`);
 
             //Reply pretending to be a UAP1
             // 3: Device type (UAP1 is allegedly 20)
