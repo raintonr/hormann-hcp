@@ -1,8 +1,11 @@
 const SerialPort = require('serialport');
 const HCPParser = require('./parser-hcp');
+const NanoTimer = require('nanotimer');
+const slotTimer = new NanoTimer();
+var slotDelay = '2300u';
 
 // Address to respond to. Emulate an 'Intelligent control panel' (16-45)
-const icAddress = 130;
+const icAddress = 0x28;
 
 // Address of gate motor 'master'
 const driveAddress = 0x80;
@@ -17,9 +20,8 @@ const port = new SerialPort('/dev/ttyUSB0', {
     highWaterMark: 1 // Necessary for the parser to process messages byte at a time
 });
 
-var toSend;
 var masterStatus;
-var lastData = Date.now();
+var lastData = process.hrtime.bigint();
 
 // Specification calls for a rotating counter
 var counter = 0;
@@ -46,7 +48,16 @@ const hcpParser = new HCPParser({ receiveAddress: icAddress });
 const parser = port.pipe(hcpParser);
 parser.on('data', (buffer) => {
     const delay = dataDelay();
-    //    console.log(`\n+${delay}\tData\t ${buffer.toString('hex')}`);
+
+    var reply;
+    // Set a timeout on our reply slot
+    slotTimer.setTimeout(() => {
+        if (Buffer.isBuffer(reply)) {
+            writeDrain(reply);
+        }
+    }, '', slotDelay);
+
+    //    console.log(`+${delay}\tData\t ${buffer.toString('hex')}`);
 
     if (buffer[0] === 0) {
         //        process.stdout.write(`\t\t\t\t\t\t\t+${delay}\tBroadcast\t ${buffer.toString('hex')}\r`);
@@ -80,39 +91,45 @@ parser.on('data', (buffer) => {
             counter = buffer[1] & 0xf0;
             counter = counter >> 4;
 
-            makeSend(buffer[3], [20, icAddress]);
+            reply = makeSend(buffer[3], [20, icAddress]);
         } else {
             console.error(`\n+${delay}\tUnknown message for us\t ${buffer.toString('hex')}`);
         }
     } else {
         console.log(`+${delay}\tUnknown ${buffer.length}\t ${buffer.toString('hex')}`);
     }
-
-    // If we have something to send out, don't do it after a broadcast message
-    if (Buffer.isBuffer(toSend) && toSend.length > 0) {
-        const delay = dataDelay();
-        console.log(`+${delay}\tSending ${toSend.length}\t ${toSend.toString('hex')}`);
-        port.write(toSend, (err) => {
-            if (err) {
-                console.error('Error writing: ', err.message)
-            }
-        });
-        port.drain((err) => {
-            if (err) {
-                console.error('Error draining: ', err.message);
-            }
-        });
-        toSend = undefined;
-    }
 });
 
+function writeDrain(toSend) {
+    const delay = dataDelay();
+    console.log(`+${delay}\tSending\t${toSend.length}\t${toSend.toString('hex')}`);
+    port.write(toSend, (err) => {
+        if (err) {
+            console.error('Error writing: ', err.message)
+        }
+    });
+    port.drain((err) => {
+        if (err) {
+            console.error('Error draining: ', err.message);
+        }
+    });
+}
+
+function send(target, bytes) {
+    const toSend = makeSend(target, bytes);
+
+    setTimeout(() => {
+        writeDrain(toSend);
+    }, 1);
+}
+
 port.on('drain', () => {
-    console.log('Drain emitted');
+    //    console.log('Drain emitted');
 });
 
 function dataDelay() {
     // Work out delay since last message
-    const dataTime = Date.now();
+    const dataTime = process.hrtime.bigint();
     const dataDelay = dataTime - lastData;
     lastData = dataTime;
     return dataDelay;
@@ -122,7 +139,7 @@ function makeSend(target, bytes) {
     // Pad start with x empty bytes. TODO: just experimentation!
     const emptyStart = 0;
 
-    toSend = new Buffer.alloc(bytes.length + 3 + emptyStart);
+    const toSend = new Buffer.alloc(bytes.length + 3 + emptyStart);
 
     toSend[emptyStart] = target;
     toSend[emptyStart + 1] = bytes.length;
@@ -131,11 +148,12 @@ function makeSend(target, bytes) {
     counter = counter == 0x0f ? 0 : counter + 1;
     toSend[emptyStart + 1] = toSend[emptyStart + 1] | (counter << 4);
 
-    // TODO: cater for more than 2 bytes
-    toSend[emptyStart + 2] = bytes[0];
-    toSend[emptyStart + 3] = bytes[1];
-
+    for (var lp = 0; lp < bytes.length; lp++) {
+        toSend[emptyStart + 2 + lp] = bytes[lp];
+    }
     toSend[toSend.length - 1] = hcpParser.computeCRC(toSend.slice(emptyStart, toSend.length - 1));
+
+    return toSend;
 }
 
 console.log('Opening port...');

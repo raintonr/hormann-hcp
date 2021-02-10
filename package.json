@@ -5,6 +5,7 @@
     "main": "hormann-hcp.js",
     "dependencies": {
         "crc-full": "*",
+        "nanotimer": "*",
         "serialport": "*"
     },
     "devDependencies": {},
