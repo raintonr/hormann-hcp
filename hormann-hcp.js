@@ -2,7 +2,7 @@ const SerialPort = require('serialport');
 const HCPParser = require('./parser-hcp');
 const NanoTimer = require('nanotimer');
 const slotTimer = new NanoTimer();
-var slotDelay = BigInt(5000000);
+var slotDelay = BigInt(2500000);
 
 // Address to respond to. Emulate an 'Intelligent control panel' (16-45)
 const icAddress = 0x28;
@@ -10,14 +10,17 @@ const icAddress = 0x28;
 // Address of gate motor 'master'
 const driveAddress = 0x80;
 
-console.log('Setting up port...');
-const port = new SerialPort('/dev/ttyUSB0', {
-    autoOpen: false,
+const portOptions = {
     baudRate: 19200,
     dataBits: 8,
     parity: 'none',
     stopBits: 1,
-    highWaterMark: 1 // Necessary for the parser to process messages byte at a time
+}
+console.log('Setting up port...');
+const port = new SerialPort('/dev/ttyUSB0', {
+    autoOpen: false,
+    highWaterMark: 1, // Necessary for the parser to process messages byte at a time
+    ...portOptions
 });
 
 var masterStatus;
@@ -48,13 +51,13 @@ const hcpParser = new HCPParser({ receiveAddress: icAddress });
 const parser = port.pipe(hcpParser);
 parser.on('data', (buffer) => {
     const delay = dataDelay(hcpParser.getPacketTime());
-//    console.log(`+${delay}\tData\t ${buffer.toString('hex')}`);
+    //    console.log(`+${delay}\tData\t ${buffer.toString('hex')}`);
 
     var reply;
     // Set a timeout on our reply slot
     slotTimer.setTimeout(() => {
         if (Buffer.isBuffer(reply)) {
-            writeDrain(reply);
+            breakWrite(reply);
         }
     }, '', (process.hrtime.bigint() - hcpParser.getPacketTime() + slotDelay) + 'n');
 
@@ -99,6 +102,33 @@ parser.on('data', (buffer) => {
     }
 });
 
+function breakWrite(toSend) {
+    const delay = dataDelay(process.hrtime.bigint());
+    console.log(`+${delay}\tBreak/send\t${toSend.length}\t${toSend.toString('hex')}`);
+    port.update({
+        baudRate: 9600,
+        dataBits: 7,
+        parity: 'none',
+        stopBits: 1,
+    }, (err) => {
+        if (err) {
+            console.error('Error updating port: ', err.message);
+        } else {
+            port.write([0], (err) => {
+                if (err) {
+                    console.error('Error writing: ', err.message);
+                }
+            });
+            port.drain((err) => {
+                if (err) {
+                    console.error('Error draining: ', err.message);
+                }
+                writeDrain(toSend);
+            });
+        }
+    });
+}
+
 function writeDrain(toSend) {
     const delay = dataDelay(process.hrtime.bigint());
     console.log(`+${delay}\tSending\t${toSend.length}\t${toSend.toString('hex')}`);
@@ -125,6 +155,11 @@ function send(target, bytes) {
 port.on('drain', () => {
     const delay = dataDelay(process.hrtime.bigint());
     console.log(`+${delay}\tDrain emitted`);
+    port.update(portOptions, (err) => {
+        if (err) {
+            console.error('Error updating port: ', err.message);
+        }
+    });
 });
 
 function dataDelay(dataTime) {
