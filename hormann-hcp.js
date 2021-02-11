@@ -75,10 +75,10 @@ parser.on('data', (buffer) => {
         //  +------ (0x40) Motor running: 1 == running. 0 == stopped.
         //   +----- (0x20) Motor direction: 1 == closing. 0 == opening.
         //    +---- (0x10) Unknown
-        //     +--- (0x08) Unknown (fully closed?)
-        //      +-- (0x04) Reed switch: 1 == no magnet. 0 == magnet present (fully open).
-        //       +- (0x02) Unknown
-        //        + (0x01) Unknown
+        //     +--- (0x08) Unknown
+        //      +-- (0x04) Unknown
+        //       +- (0x02) Fully closed 
+        //        + (0x01) Fully open
 
         if (masterStatus !== currentStatus) {
             masterStatus = currentStatus;
@@ -86,6 +86,10 @@ parser.on('data', (buffer) => {
         }
     } else if (buffer[0] === icAddress) {
         // Something for our address
+        // Pull counter out of message for any reply
+        counter = buffer[1] & 0xf0;
+        counter = counter >> 4;
+
         if (buffer[2] === 0x01) {
             // Slave query
             console.log(`+${delay}\tSlave query\t ${buffer.toString('hex')}`);
@@ -97,22 +101,23 @@ parser.on('data', (buffer) => {
             // 3: Device type (UAP1 is allegedly 20)
             // 4: Device address
 
-            // Pull counter out of message
-            counter = buffer[1] & 0xf0;
-            counter = counter >> 4;
-
             reply = makeSend(masterAddress, [20 /* arbitrary type */, icAddress]);
         } else if (buffer[2] == 0x20) {
             // Slave status request
-//            console.log(`+${delay}\tSlave status request\t ${buffer.toString('hex')}`);
+            //            console.log(`+${delay}\tSlave status request\t ${buffer.toString('hex')}`);
 
-            // Reply 
+            // Command mask for LineaMatic P:
+            // +------- (0x80) Unknown
+            //  +------ (0x40) Unknown
+            //   +----- (0x20) Unknown
+            //    +---- (0x10) Moves to 'H' (whatever that means)
+            //     +--- (0x08) Unknown
+            //      +-- (0x04) Impulse toggle
+            //       +- (0x02) Impulse close
+            //        + (0x01) Impulse open
 
-            // Pull counter out of message
-            counter = buffer[1] & 0xf0;
-            counter = counter >> 4;
-
-            reply = makeSend(masterAddress, [0x29 /* slave status */, ourStatus, 0, 0]);
+            // For some reason the second byte needs to be 0x10 (signals no error?)
+            reply = makeSend(masterAddress, [0x29 /* slave status */, ourStatus, 0x10]);
 
             // Clear any commands after send
             ourStatus = 0;
@@ -126,7 +131,7 @@ parser.on('data', (buffer) => {
 
 function breakWrite(toSend) {
     const delay = dataDelay(process.hrtime.bigint());
-//    console.log(`+${delay}\tBreak/send\t${toSend.length}\t${toSend.toString('hex')}`);
+    //    console.log(`+${delay}\tBreak/send\t${toSend.length}\t${toSend.toString('hex')}`);
     port.update({
         baudRate: 9600,
         dataBits: 7,
@@ -145,7 +150,13 @@ function breakWrite(toSend) {
                 if (err) {
                     console.error('Error draining: ', err.message);
                 }
-                writeDrain(toSend);
+                // Put port settings back and send our message
+                port.update(portOptions, (err) => {
+                    if (err) {
+                        console.error('Error updating port: ', err.message);
+                    }
+                    writeDrain(toSend);
+                });
             });
         }
     });
@@ -153,7 +164,7 @@ function breakWrite(toSend) {
 
 function writeDrain(toSend) {
     const delay = dataDelay(process.hrtime.bigint());
-//    console.log(`+${delay}\tSending\t${toSend.length}\t${toSend.toString('hex')}`);
+    //    console.log(`+${delay}\tSending\t${toSend.length}\t${toSend.toString('hex')}`);
     port.write(toSend, (err) => {
         if (err) {
             console.error('Error writing: ', err.message)
@@ -165,24 +176,6 @@ function writeDrain(toSend) {
         }
     });
 }
-
-function send(target, bytes) {
-    const toSend = makeSend(target, bytes);
-
-    setTimeout(() => {
-        writeDrain(toSend);
-    }, 1);
-}
-
-port.on('drain', () => {
-    const delay = dataDelay(process.hrtime.bigint());
-//    console.log(`+${delay}\tDrain emitted`);
-    port.update(portOptions, (err) => {
-        if (err) {
-            console.error('Error updating port: ', err.message);
-        }
-    });
-});
 
 function dataDelay(dataTime) {
     // Work out delay since last message
