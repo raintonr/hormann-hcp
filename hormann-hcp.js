@@ -7,8 +7,8 @@ var slotDelay = BigInt(2500000);
 // Address to respond to. Emulate an 'Intelligent control panel' (16-45)
 const icAddress = 0x28;
 
-// Address of gate motor 'master'
-const driveAddress = 0x80;
+// Address of gate motor 'master' - should be noted when bus scan recieved.
+var masterAddress;
 
 const portOptions = {
     baudRate: 19200,
@@ -30,6 +30,7 @@ var lastData = process.hrtime.bigint();
 var counter = 0;
 
 // TODO: Prepare for when we will use keyboard input to send
+var ourStatus = 0x00;
 var stdin = process.stdin;
 stdin.setRawMode(true);
 stdin.resume();
@@ -42,8 +43,9 @@ stdin.on('data', function (key) {
     // write the key to stdout all normal like
     if (key === '1') {
         console.log('Sending command 1');
-        //makeSend(driveAddress, [41, 2]);
+        ourStatus ^= 0x10;
     }
+    console.log(`OurStatus: ${ourStatus.toString(2)}`);
 });
 
 console.log('Initiating parser...');
@@ -85,7 +87,10 @@ parser.on('data', (buffer) => {
             // Slave query
             console.log(`+${delay}\tSlave query\t ${buffer.toString('hex')}`);
 
-            //Reply pretending to be a UAP1
+            // Note master address
+            masterAddress = buffer[3];
+
+            // Reply pretending to be a UAP1
             // 3: Device type (UAP1 is allegedly 20)
             // 4: Device address
 
@@ -93,7 +98,18 @@ parser.on('data', (buffer) => {
             counter = buffer[1] & 0xf0;
             counter = counter >> 4;
 
-            reply = makeSend(buffer[3], [20, icAddress]);
+            reply = makeSend(masterAddress, [20 /* arbitrary type */, icAddress]);
+        } else if (buffer[2] == 0x20) {
+            // Slave status request
+//            console.log(`+${delay}\tSlave status request\t ${buffer.toString('hex')}`);
+
+            // Reply 
+
+            // Pull counter out of message
+            counter = buffer[1] & 0xf0;
+            counter = counter >> 4;
+
+            reply = makeSend(masterAddress, [0x29 /* slave status */, ourStatus]);
         } else {
             console.error(`\n+${delay}\tUnknown message for us\t ${buffer.toString('hex')}`);
         }
@@ -104,7 +120,7 @@ parser.on('data', (buffer) => {
 
 function breakWrite(toSend) {
     const delay = dataDelay(process.hrtime.bigint());
-    console.log(`+${delay}\tBreak/send\t${toSend.length}\t${toSend.toString('hex')}`);
+//    console.log(`+${delay}\tBreak/send\t${toSend.length}\t${toSend.toString('hex')}`);
     port.update({
         baudRate: 9600,
         dataBits: 7,
@@ -131,7 +147,7 @@ function breakWrite(toSend) {
 
 function writeDrain(toSend) {
     const delay = dataDelay(process.hrtime.bigint());
-    console.log(`+${delay}\tSending\t${toSend.length}\t${toSend.toString('hex')}`);
+//    console.log(`+${delay}\tSending\t${toSend.length}\t${toSend.toString('hex')}`);
     port.write(toSend, (err) => {
         if (err) {
             console.error('Error writing: ', err.message)
@@ -154,7 +170,7 @@ function send(target, bytes) {
 
 port.on('drain', () => {
     const delay = dataDelay(process.hrtime.bigint());
-    console.log(`+${delay}\tDrain emitted`);
+//    console.log(`+${delay}\tDrain emitted`);
     port.update(portOptions, (err) => {
         if (err) {
             console.error('Error updating port: ', err.message);
