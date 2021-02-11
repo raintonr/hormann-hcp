@@ -41,9 +41,12 @@ stdin.on('data', function (key) {
         process.exit();
     }
     // write the key to stdout all normal like
-    if (key === '1') {
-        console.log('Sending command 1');
-        ourStatus ^= 0x10;
+    if (key >= '1' && key < '9') {
+        console.log(`Sending command ${key}`);
+        ourStatus ^= 1 << (key - 1);
+    } else {
+        console.log('Reset command');
+        ourStatus = 0;
     }
     console.log(`OurStatus: ${ourStatus.toString(2)}`);
 });
@@ -109,7 +112,10 @@ parser.on('data', (buffer) => {
             counter = buffer[1] & 0xf0;
             counter = counter >> 4;
 
-            reply = makeSend(masterAddress, [0x29 /* slave status */, ourStatus]);
+            reply = makeSend(masterAddress, [0x29 /* slave status */, ourStatus, 0, 0]);
+
+            // Clear any commands after send
+            ourStatus = 0;
         } else {
             console.error(`\n+${delay}\tUnknown message for us\t ${buffer.toString('hex')}`);
         }
