@@ -2,7 +2,7 @@ const { Transform } = require('stream');
 const CRC = require('crc-full').CRC;
 
 // Timespan with no data before we consider a new packet starts (nanoseconds);
-const packetInterval = BigInt(2300000);
+const packetInterval = BigInt(200000);
 
 class HCPParser extends Transform {
     constructor(options) {
