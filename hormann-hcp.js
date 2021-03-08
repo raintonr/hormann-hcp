@@ -3,7 +3,7 @@ const HCPParser = require('./parser-hcp');
 const NanoTimer = require('nanotimer');
 const slotTimer = new NanoTimer();
 const readOnly = false;
-var slotDelay = BigInt(2500000);
+var slotDelay = BigInt(2200000);
 
 // Address to respond to. Emulate an 'Intelligent control panel' (16-45)
 const icAddress = 0x28;
@@ -60,13 +60,6 @@ parser.on('data', (buffer) => {
     //    console.log(`+${delay}\tData\t ${buffer.toString('hex')}`);
 
     var reply;
-    // Set a timeout on our reply slot
-    slotTimer.setTimeout(() => {
-        if (Buffer.isBuffer(reply)) {
-            breakWrite(reply);
-        }
-    }, '', (process.hrtime.bigint() - hcpParser.getPacketTime() + slotDelay) + 'n');
-
     if (buffer[0] === 0) {
         //        process.stdout.write(`\t\t\t\t\t\t\t+${delay}\tBroadcast\t ${buffer.toString('hex')}\r`);
         const currentStatus = buffer[2];
@@ -127,6 +120,10 @@ parser.on('data', (buffer) => {
         }
     } else {
         //        console.log(`+${delay}\tUnknown ${buffer.length}\t ${buffer.toString('hex')}`);
+    }
+
+    if (Buffer.isBuffer(reply)) {
+        breakWrite(reply);
     }
 });
 
