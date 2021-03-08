@@ -1,7 +1,7 @@
 # hormann-hcp
 Experiments with the Hormann HCP bus
 
-Inspired by https://blog.bouni.de/2018/reverse-engeneering-the-hormann-uap1-protocoll.html
+Inspired by https://blog.bouni.de/posts/2018/hoerrmann-uap1/
 
 Seems to be working just fine with LineaMatic P motor. Test experiment responds instantly to keyboard input.
 
@@ -21,7 +21,7 @@ npm install
 
 make sure you have your USB/RS485 dongle connected and it is showing up as `/dev/ttyUSB0`.
 
-start the program with `nodejs hormann-hcp.js`
+start the program with `npm start`
 
 You then get some debug output like this:
 
