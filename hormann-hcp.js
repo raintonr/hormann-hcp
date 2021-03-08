@@ -2,6 +2,7 @@ const SerialPort = require('serialport');
 const HCPParser = require('./parser-hcp');
 const NanoTimer = require('nanotimer');
 const slotTimer = new NanoTimer();
+const readOnly = false;
 var slotDelay = BigInt(2500000);
 
 // Address to respond to. Emulate an 'Intelligent control panel' (16-45)
@@ -130,6 +131,9 @@ parser.on('data', (buffer) => {
 });
 
 function breakWrite(toSend) {
+    // Don't ever send anything if readOnly
+    if (readOnly) return;
+
     const delay = dataDelay(process.hrtime.bigint());
     //    console.log(`+${delay}\tBreak/send\t${toSend.length}\t${toSend.toString('hex')}`);
     port.update({
