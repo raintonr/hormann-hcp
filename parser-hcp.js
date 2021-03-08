@@ -75,7 +75,7 @@ class HCPParser extends Transform {
                 if (byte !== crc) {
                     console.error(`\t\tCRC: ${byte} != ${crc}`);
                 } else if (this.promiscuous || this.currentPacket[0] === 0 || this.currentPacket[0] === this.receiveAddress) {
-                    // Ppromiscuous mode, broadcast packet or for receive address
+                    // Promiscuous mode, broadcast packet or for receive address
                     this.emitPacket();
                 }
                 this._clearPacket();
