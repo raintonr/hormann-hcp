@@ -13,9 +13,6 @@ const logTX = require('debug')(baseDebug + ':TX');
 const readOnly = false;
 const promiscuous = false;
 
-// Timespan with no data before we consider a new packet starts (nanoseconds).
-const packetInterval = BigInt(1500000);
-
 // Timespan which we will force a new packet, even if one appears to be in progress.
 const packetForceInterval = BigInt(6000000);
 
@@ -75,7 +72,7 @@ stdin.on('data', function (key) {
 });
 
 console.log('Setting up port...');
-const port = new SerialPort('/dev/ttyAMA0', {
+const port = new SerialPort('/dev/ttyUSB0', {
     autoOpen: false,
     highWaterMark: 1, // Necessary for the parser to process messages byte at a time
     ...portOptions
@@ -99,9 +96,16 @@ port.on('data', (chunk) => {
     if (chunk.length !== 1) {
         console.error('Chunk length should always be 1!');
     } else {
-        // Check the delay and that nothing is in progress because seems the 'packetInterval' is
-        // sometimes so short would constantly start new packets if this wasn't there.
-        if (delay > packetInterval && !currentPacketInProgress) {
+        /*
+         * Start a new packet if none in progress. Through testing found that trying to
+         * use timing here didn't work well across platforms.
+         * Naturally, this means a new packet could be started here part way through
+         * transmission. Turns out that isn't an issue as we can detect bad packets
+         * with CRC and other checks and very regularly there is a larger, more reliable
+         * delay (the packetForceInterval) that causes everything to reset.
+         */
+
+        if (!currentPacketInProgress) {
             // Transmission window passed, start a new packet
             logPacketStart(`New packet after ${delay}`);
             newPacket();
@@ -110,9 +114,11 @@ port.on('data', (chunk) => {
             // what appear to be genuine CRC or other errors.
             logPacketStart(`Forcing new packet after ${delay}`);
             newPacket();
-            // As this probably happened after genuine CRC error means we probably missed a
-            // packet and our counter will be out of sync, so set flag that will copy from next
-            // good packet.
+            /*
+             * As this probably happened after genuine CRC error means we probably missed a
+             * packet and our counter will be out of sync, so set flag that will copy from next
+             * good packet.
+             */
             currentPacketResetCounter = true;
         }
 
@@ -321,7 +327,7 @@ function writeDrain(toSend) {
 
 function dataDelay(dataTime) {
     // Work out delay since last message
-    if (typeof(dataTime) === 'undefined') {
+    if (typeof (dataTime) === 'undefined') {
         dataTime = process.hrtime.bigint();
     }
     const dataDelay = dataTime - lastData;
