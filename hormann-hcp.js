@@ -13,10 +13,10 @@ const logTX = require('debug')(baseDebug + ':TX');
 const readOnly = false;
 const promiscuous = false;
 
-// Timespan with no data before we consider a new packet starts (nanoseconds);
-const packetInterval = BigInt(200000);
+// Timespan with no data before we consider a new packet starts (nanoseconds).
+const packetInterval = BigInt(1500000);
 
-// Timespan which we will force a new packet, even if one appears to be in progress;
+// Timespan which we will force a new packet, even if one appears to be in progress.
 const packetForceInterval = BigInt(6000000);
 
 // What's the maximum length message we think should be handled?
@@ -39,6 +39,7 @@ const portOptions = {
 // Globals for packets. TODO: clean this up later
 var packetTime = BigInt(0);
 var currentPacketInProgress = false;
+var currentPacketResetCounter = false;
 var nextCounter = 0;
 
 // CRC calc
@@ -46,7 +47,6 @@ const CRC = require('crc-full').CRC;
 const crcCalculator = new CRC('CRC8', 8, 0x07, 0xf3, 0x00, false, false);
 
 var masterStatus;
-var lastChunk = BigInt(0);
 var lastData = process.hrtime.bigint();
 
 // Specification calls for a rotating counter
@@ -90,21 +90,30 @@ function newPacket() {
     currentPacket = [];
     currentPacketEnd = 0;
     currentPacketInProgress = true;
+    currentPacketResetCounter = false;
 }
 
 port.on('data', (chunk) => {
     const delay = dataDelay();
-    logChunks(`New chunk (${chunk.length}) ${chunk.toString('hex')}`);
+    logChunks(`Chunk after ${delay} : (${chunk.length}) ${chunk.toString('hex')}`);
     if (chunk.length !== 1) {
         console.error('Chunk length should always be 1!');
     } else {
-        if (!currentPacketInProgress) {
+        // Check the delay and that nothing is in progress because seems the 'packetInterval' is
+        // sometimes so short would constantly start new packets if this wasn't there.
+        if (delay > packetInterval && !currentPacketInProgress) {
             // Transmission window passed, start a new packet
-            logPacketStart(`New packet`);
+            logPacketStart(`New packet after ${delay}`);
             newPacket();
         } else if (delay > packetForceInterval) {
+            // packetForceInterval is to reset packets that appear to just run on and on after
+            // what appear to be genuine CRC or other errors.
             logPacketStart(`Forcing new packet after ${delay}`);
             newPacket();
+            // As this probably happened after genuine CRC error means we probably missed a
+            // packet and our counter will be out of sync, so set flag that will copy from next
+            // good packet.
+            currentPacketResetCounter = true;
         }
 
         /*
@@ -116,7 +125,10 @@ port.on('data', (chunk) => {
          * On some other UART devices this doesn't seem to happen, but don't know how to detect that
          * and therefore how to detect 'break' on these.
          *
-         * So we have to assume that a packet will sometimes have an extra zero value byte at the start
+         * So we have to assume that a packet will sometimes have an extra zero value byte at the start.
+         * 
+         * Below is rather inelegant, but basically it brute-force checks every packet against the known
+         * logic from byte zero and from byte one then uses the one that checks out (if either do).
          */
 
         currentPacket.push(chunk[0]);
@@ -142,8 +154,8 @@ function isGoodPacket(buffer) {
     // TODO: check targetAddress is valid?
 
     // High nibble == counter.
-    const nibbleCounter = (buffer[1] & 0xf0) >> 4;
-    if (nibbleCounter !== nextCounter) {
+    const nibbleCounter = extractPacketCounter(buffer);
+    if (!currentPacketResetCounter && nibbleCounter !== nextCounter) {
         logPacketState(`Bad message counter: ${nibbleCounter} != ${nextCounter}`);
         isGood = false;
     }
@@ -171,10 +183,20 @@ function isGoodPacket(buffer) {
     return isGood;
 }
 
+function extractPacketCounter(buffer) {
+    return (buffer[1] & 0xf0) >> 4;
+}
+
 function processPacket(buffer) {
     logPacketProcess(`Packet RX: ${buffer.toString('hex')}`);
 
     currentPacketInProgress = false;
+
+    if (currentPacketResetCounter) {
+        // Reset our counter to match that of the RX packet
+        nextCounter = extractPacketCounter(buffer);
+        logPacketState(`Reset counter to ${nextCounter}`);
+    }
     nextCounter = nextCounter >= 15 ? 0 : nextCounter + 1;
 
     // Ignore if not for us
