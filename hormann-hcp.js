@@ -1,14 +1,22 @@
 const SerialPort = require('serialport');
-const HCPParser = require('./parser-hcp');
-const NanoTimer = require('nanotimer');
-const slotTimer = new NanoTimer();
-const readOnly = false;
-var slotDelay = BigInt(2200000);
+
+// Some options for testing
+const readOnly = true;
+const promiscuous = false;
+
+// Timespan with no data before we consider a new packet starts (nanoseconds);
+const packetInterval = BigInt(200000);
+
+// Timespan which we will force a new packet, even if one appears to be in progress;
+const packetForceInterval = BigInt(30000000);
+
+// What's the maximum length message we think should be handled?
+const maxMessageLength = 3;
 
 // Address to respond to. Emulate an 'Intelligent control panel' (16-45)
 const icAddress = 0x28;
 
-// Address of gate motor 'master' - should be noted when bus scan recieved.
+// Address of gate motor 'master' - should be noted when bus scan received.
 var masterAddress;
 
 const portOptions = {
@@ -24,13 +32,22 @@ const port = new SerialPort('/dev/ttyAMA0', {
     ...portOptions
 });
 
+// Globals for current packet. TODO: clean this up later
+var packetTime = BigInt(0);
+var currentPacketInProgress = false;
+
+// CRC calc
+const CRC = require('crc-full').CRC;
+const crcCalculator = new CRC('CRC8', 8, 0x07, 0xf3, 0x00, false, false);
+
 var masterStatus;
+var lastChunk = BigInt(0);
 var lastData = process.hrtime.bigint();
 
 // Specification calls for a rotating counter
 var counter = 0;
 
-// TODO: Prepare for when we will use keyboard input to send
+// Prepare for when we will use keyboard input to send
 var ourStatus = 0x00;
 var stdin = process.stdin;
 stdin.setRawMode(true);
@@ -52,16 +69,93 @@ stdin.on('data', function (key) {
     console.log(`OurStatus: ${ourStatus.toString(2)}`);
 });
 
-console.log('Initiating parser...');
-const hcpParser = new HCPParser({ receiveAddress: icAddress });
-const parser = port.pipe(hcpParser);
-parser.on('data', (buffer) => {
-    const delay = dataDelay(hcpParser.getPacketTime());
+function newPacket() {
+    packetTime = process.hrtime.bigint();
+    currentPacket = [];
+    currentPacketEnd = 0;
+    currentPacketInProgress = true;
+}
+
+port.on('data', (chunk) => {
+    const delay = dataDelay();
+
+    console.log(`\t\t\t\t\t+${delay}\tNew chunk (${chunk.length})\t${chunk.toString('hex')}`);
+    if (chunk.length !== 1) {
+        console.error('Chunk should always be 1!');
+    } else {
+        const byte = chunk[0];
+
+        if (delay > packetInterval && !currentPacketInProgress) {
+            // Transmission window passed, start a new packet
+            console.error(`New packet after ${delay}`);
+            newPacket();
+        } else if (delay > packetForceInterval) {
+            console.error(`Forcing new packet after ${delay}`);
+            newPacket();
+        }
+
+        /*
+         * Tricky situation...
+         *
+         * On some USB UART devices seems the 'break' that each packet starts with is interpreted
+         * as an error (guessing?) and a zero value byte is thrown out here.
+         *
+         * On some other UART devices this doesn't seem to happen, but don't know how to detect that
+         * and therefore how to detect 'break' on these.
+         *
+         * So we have to assume that a packet will sometimes have an extra zero value byte at the start
+         */
+        if (currentPacketInProgress) {
+            const byteSeq = currentPacket.length;
+            if (byteSeq === 0) {
+                // Stash this as the first byte in our buffer.
+                // console.log(`\t\tNew packet starting ${byte.toString('16')}`);
+                currentPacket.push(byte);
+            } else if (byteSeq === 1) {
+                // Counter/message length
+                // High nibble == counter. TODO: ignore for now
+                // Low nibble == length
+                var nibbleMessageLength = byte & 0x0f;
+
+                // If the length looks dodgy and & the starting byte was zero let's assume
+                // the starting byte we had was a result of BRK and replace it.
+                if (currentPacket[0] === 0 && (
+                    byte === 0 || nibbleMessageLength === 0 || nibbleMessageLength > maxMessageLength)) {
+                    console.log(`\t\tLooks like a premature start to packet, replacing with ${byte.toString('16')}`);
+                    currentPacket[0] = byte;
+                } else {
+                    // Looks good
+                    // So last byte of this message will be...
+                    currentPacketEnd = nibbleMessageLength + byteSeq + 1;
+                    // console.log(`\t\tCurrent packet will end byte ${currentPacketEnd}`);
+                    currentPacket.push(byte);
+                }
+            } else if (byteSeq < currentPacketEnd) {
+                // console.log(`\t\tData: ${byte}`);
+                currentPacket.push(byte);
+            } else {
+                // Last byte of message - this is CRC
+                const crc = crcCalculator.compute(currentPacket);
+                if (byte !== crc) {
+                    console.error(`\t\tCRC: ${byte} != ${crc}`);
+                } else if (promiscuous || currentPacket[0] === 0 || currentPacket[0] === icAddress) {
+                    // Promiscuous mode, broadcast packet or for receive address
+                    processPacket(currentPacket);
+                }
+                // We've finished either way
+                currentPacketInProgress = false;
+            }
+        }
+    }
+});
+
+function processPacket(buffer) {
+    const delay = dataDelay(packetTime);
     //    console.log(`+${delay}\tData\t ${buffer.toString('hex')}`);
 
     var reply;
     if (buffer[0] === 0) {
-        //        process.stdout.write(`\t\t\t\t\t\t\t+${delay}\tBroadcast\t ${buffer.toString('hex')}\r`);
+        process.stdout.write(`\t\t\t\t\t\t\t+${delay}\tBroadcast\t ${buffer.toString('hex')}\r`);
         const currentStatus = buffer[2];
 
         // Status mask for LineaMatic P:
@@ -74,7 +168,7 @@ parser.on('data', (buffer) => {
         //       +- (0x02) Fully closed 
         //        + (0x01) Fully open
 
-        if (masterStatus !== currentStatus) {
+        if (true || masterStatus !== currentStatus) {
             masterStatus = currentStatus;
             console.log(`\n+${delay}\tNew status\t ${buffer.toString('hex')} -> ${masterStatus.toString(2)}`);
         }
@@ -125,13 +219,13 @@ parser.on('data', (buffer) => {
     if (Buffer.isBuffer(reply)) {
         breakWrite(reply);
     }
-});
+}
 
 function breakWrite(toSend) {
     // Don't ever send anything if readOnly
     if (readOnly) return;
 
-    const delay = dataDelay(process.hrtime.bigint());
+    const delay = dataDelay();
     //    console.log(`+${delay}\tBreak/send\t${toSend.length}\t${toSend.toString('hex')}`);
     port.update({
         baudRate: 9600,
@@ -164,7 +258,7 @@ function breakWrite(toSend) {
 }
 
 function writeDrain(toSend) {
-    const delay = dataDelay(process.hrtime.bigint());
+    const delay = dataDelay();
     //    console.log(`+${delay}\tSending\t${toSend.length}\t${toSend.toString('hex')}`);
     port.write(toSend, (err) => {
         if (err) {
@@ -180,6 +274,9 @@ function writeDrain(toSend) {
 
 function dataDelay(dataTime) {
     // Work out delay since last message
+    if (typeof(dataTime) === 'undefined') {
+        dataTime = process.hrtime.bigint();
+    }
     const dataDelay = dataTime - lastData;
     lastData = dataTime;
     return dataDelay;
@@ -201,7 +298,7 @@ function makeSend(target, bytes) {
     for (var lp = 0; lp < bytes.length; lp++) {
         toSend[emptyStart + 2 + lp] = bytes[lp];
     }
-    toSend[toSend.length - 1] = hcpParser.computeCRC(toSend.slice(emptyStart, toSend.length - 1));
+    toSend[toSend.length - 1] = crcCalculator.compute(toSend.slice(emptyStart, toSend.length - 1));
 
     return toSend;
 }
