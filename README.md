@@ -1,6 +1,8 @@
 # hormann-hcp
 
-Experiments with the Hormann HCP bus.
+*Experiments* with the Hormann HCP bus.
+
+**Yes... this is a code experiment only, do not consider it even close to usable for anything useful yet!**
 
 Inspired by https://blog.bouni.de/posts/2018/hoerrmann-uap1/
 
